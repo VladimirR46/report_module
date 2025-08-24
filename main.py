@@ -25,3 +25,185 @@ REGIONS = {
     'occipital': OCCIPITAL_CHANNELS,
 }
 
+def bandpass_filter(data, sfreq, l_freq, h_freq, method='fir'):
+    if method == 'fir':
+        l_trans = min(max(0.25 * l_freq, 2.0), l_freq)
+        h_trans = min(max(0.25 * h_freq, 2.0), sfreq/2 - h_freq)
+        trans_bandwidth = min(l_trans, h_trans)
+        n_taps = int(3.3 * sfreq / trans_bandwidth) | 1
+        filt = firwin(n_taps, [l_freq, h_freq], fs=sfreq, pass_zero='bandpass')
+        return filtfilt(filt, 1, data, axis=-1)
+    else:
+        nyq = sfreq / 2
+        sos = butter(4, [l_freq/nyq, h_freq/nyq], 'band', output='sos')
+        return sosfiltfilt(sos, data, axis=-1)
+
+def psd_welch(data, sfreq, fmin=0.0, fmax=np.inf):
+    nperseg = int(min(2 * sfreq, data.shape[-1]))
+    nfft = max(nperseg, int(4 * sfreq))
+    freqs, psds = welch(data, sfreq, nperseg=nperseg,nfft=nfft, noverlap=nperseg//2)
+    freq_mask = (freqs >= fmin) & (freqs <= fmax)
+    psds = psds[:, freq_mask] if psds.ndim > 1 else psds[freq_mask]
+    return psds, freqs[freq_mask]
+
+def power_band(psds, freqs, bands, power='abs'):
+    psd = psds.copy()
+    if power == 'rel':
+        psd /= np.sum(psd, axis=-1, keepdims=True)
+    band_powers = {}
+    for band, (fmin, fmax) in bands.items():
+        mask = (freqs >= fmin) & (freqs < fmax)
+        band_powers[band] = np.mean(psd[:, mask], axis=1)
+    return band_powers
+
+def get_stream_id(streams, stream_name=None, stream_type=None):
+    """Find stream ID by name and/or stream type."""
+    for stream_id, stream in streams.items():
+        info = stream['info']
+        if stream_name is not None and info['name'][0] != stream_name:
+            continue
+        if stream_type is not None and info['type'][0] != stream_type:
+            continue
+        return stream_id
+    criteria = []
+    if stream_name: criteria.append(f"name='{stream_name}'")
+    if stream_type: criteria.append(f"type='{stream_type}'")
+    logger.error(f"Stream with {' and '.join(criteria)} not found")
+    return None
+
+class ProtocolData:
+    def __init__(self, directory):
+        self.directory = directory
+        self.task, self.streams = self.load_data()
+        self.eeg_stream = self.get_eeg_stream()
+        self.eeg_data, self.ch_list = self.load_eeg_data()
+        self.events = self.get_events()
+        self.patient = self.task['patient']
+        self.srate = int(float(self.eeg_stream["info"]["nominal_srate"][0]))
+
+    def load_data(self):
+        with open(self.directory / 'Task.json', encoding='utf-8') as file:
+            task = json.load(file)
+        streams, _ = pyxdf.load_xdf(self.directory / 'data.xdf', synchronize_clocks=True, dejitter_timestamps=True)
+        streams = {stream["info"]["stream_id"]: stream for stream in streams}
+        return task, streams
+
+    def get_eeg_stream(self):
+        eeg_id = get_stream_id(self.streams, stream_type='EEG')
+        return self.streams[eeg_id]
+
+    def load_eeg_data(self):
+        ch_list, units = [], []
+        for ch in self.eeg_stream["info"]["desc"][0]["channels"][0]["channel"]:
+            ch_list.append(str(ch["label"][0]))
+            units.append(ch["unit"][0] if ch["unit"] else "NA")
+        time_series = self.eeg_stream["time_series"]
+        #microvolts = ("microvolt", "microvolts", "µV", "μV", "uV")
+        #scale = np.array([1e-6 if u in microvolts else 1 for u in units])
+        #time_series_scaled = (time_series * scale).T
+        time_series_scaled = time_series.T
+        return time_series_scaled, ch_list
+
+    def get_events(self):
+        events = self.task['events']
+        samples = self.task['samples']
+        first_time = self.eeg_stream["time_stamps"][0]
+        event_dict = {'source': [], 'event_name': [], 'sample_type': [], 'trial_type': [], 'block_type': [],
+                      'block_id': [], 'trial_id': [], 'event_id': [], 'item_id': [], 'sample_id': [],
+                      'trigger_code': [],
+                      'time': [], 'index': [], 'duration': []}
+        for event in events:
+            sample = samples[event['sample_id']]
+            event_dict['source'].append(event['source'])
+            event_dict['event_name'].append(event['event_name'])
+            event_dict['sample_type'].append(sample['sample_type'])
+            event_dict['trial_type'].append(sample['trial_type'])
+            event_dict['block_type'].append(sample['block_type'])
+            event_dict['block_id'].append(sample['block_id'])
+            event_dict['trial_id'].append(sample['trial_id'])
+            event_dict['event_id'].append(event['event_id'])
+            event_dict['item_id'].append(event['item_id'])
+            event_dict['sample_id'].append(event['sample_id'])
+            event_dict['trigger_code'].append(sample['trigger_code'])
+            event_dict['time'].append(event['time'] - first_time)
+            event_dict['duration'].append(float(sample['duration']) if event['event_name'] == 'show' else 0.0)
+        for key in event_dict:
+            event_dict[key] = np.array(event_dict[key])
+        return event_dict
+
+    def pick_channels(self, names):
+        indices = []
+        missing_channels = []
+        for name in names:
+            if name in self.ch_list:
+                indices.append(self.ch_list.index(name))
+            else:
+                missing_channels.append(name)
+        if missing_channels:
+            logger.error(f"Channels not found: {missing_channels}")
+            return []
+        return indices
+
+def truncate(val, decimals=3):
+    sig = max(0, 4 - len(str(int(val))))
+    return format(val , '.%df' % sig)
+
+def background_process(protocol):
+    b_idxs = np.where(protocol.events['sample_type'] == 'Background')[0]
+    if len(b_idxs) != 2:
+        logger.warning("number of backgrounds is not equal to 2")
+        return None
+    b_time = protocol.events['time'][b_idxs]
+    b_dur = protocol.events['duration'][b_idxs]
+    b_start = np.round(b_time * protocol.srate).astype(int)
+    b_end = np.round((b_time + b_dur) * protocol.srate).astype(int)
+
+    bands = {'delta': (1, 4), 'theta': (4, 8), 'alpha': (8, 13), 'beta': (13, 30)}
+    stages = ['start', 'end']
+    out = {k: {} for k in stages}
+
+    for i, (start, end) in enumerate(zip(b_start, b_end)):
+        stage = stages[i]
+        data = protocol.eeg_data[:, start:end]
+
+        psds, freqs = psd_welch(data, sfreq=protocol.srate, fmin=0.5, fmax=30)
+        power_abs = power_band(psds, freqs, bands, power='abs')
+        #power_rel = {
+        #    band: power / sum(power_abs.values())
+        #    for band, power in power_abs.items()
+        #}
+        power_rel = power_band(psds, freqs, bands, power='rel')
+
+        for region_name, ch_list in REGIONS.items():
+            ch_idx = protocol.pick_channels(ch_list)
+            reg = out[stage].setdefault(region_name, {})
+
+            for band_name in bands.keys():
+                v_abs = truncate(np.mean(power_abs[band_name][ch_idx]), 3)
+                v_rel = truncate(np.mean(power_rel[band_name][ch_idx]), 3)
+                reg[band_name] = {"abs": v_abs, "rel": v_rel}
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('data_path', help='Path to patient folder')
+    args = parser.parse_args()
+
+    directory = Path(args.data_path)
+    if not directory.exists():
+        logger.error(f"Error: path {args.data_path} does not exist")
+        return
+
+    protocol = ProtocolData(directory)
+    protocol.eeg_data = bandpass_filter(protocol.eeg_data, protocol.srate, l_freq=1, h_freq=40, method='iir')
+
+    # Process Background
+    result = background_process(protocol)
+    if result is not None:
+        with open("report_data.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+
+if __name__ == "__main__":
+    main()
