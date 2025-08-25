@@ -184,6 +184,85 @@ def background_process(protocol):
                 reg[band_name] = {"abs": v_abs, "rel": v_rel}
     return out
 
+def rest_stim_bands(events, hand, srate):
+    rest = np.where(
+        (events['sample_type'] == 'Rest') &
+        (events['trial_type'] == hand+'/hand') &
+        (events['event_name'] == 'show')
+    )[0]
+    rest_time = events['time'][rest]
+    stim = np.where(
+        (np.isin(events['sample_type'], ['Point', 'Image'])) &
+        (events['trial_type'] == hand+'/hand') &
+        (events['event_name'] == 'show')
+    )[0]
+    stim_time = events['time'][stim]
+
+    rest_start = np.round(rest_time * srate).astype(int)
+    rest_end = np.round((rest_time+events['duration'][rest]) * srate).astype(int)
+    rest = np.column_stack((rest_start, rest_end))
+
+    stim_start = np.round(stim_time * srate).astype(int)
+    stim_end = np.round((stim_time+events['duration'][stim]) * srate).astype(int)
+    stim = np.column_stack((stim_start, stim_end))
+    return rest, stim
+
+def calc_trials(protocol, rest, stim):
+    r"""
+    Returns
+    -------
+    trials : ndarray
+        (trials_n, f_bands, ch_n)
+    """
+    trials = []
+    for (r_start, r_end), (s_start, s_end) in zip(rest, stim):
+        rest_data = protocol.eeg_data[:, r_start:r_end]
+        stim_data = protocol.eeg_data[:, s_start:s_end]
+
+        rest_psds, rest_freqs = psd_welch(rest_data, sfreq=protocol.srate, fmin=1, fmax=30)
+        stim_psds, stim_freqs = psd_welch(stim_data, sfreq=protocol.srate, fmin=1, fmax=30)
+
+        def power_band(psds, freqs, bands):
+            band_powers = {}
+            for band, (fmin, fmax) in bands.items():
+                mask = (freqs >= fmin) & (freqs < fmax)
+                band_powers[band] = np.mean(psds[:, mask], axis=1)
+            return band_powers
+
+        bands = {'mu': (8, 13),'beta': (13, 30)}
+        rest_bands = power_band(rest_psds, rest_freqs, bands)
+        stim_bands = power_band(stim_psds, stim_freqs, bands)
+
+        ERD_mu = (rest_bands['mu'] - stim_bands['mu']) / rest_bands['mu'] * 100
+        ERD_beta = (rest_bands['beta'] - stim_bands['beta']) / rest_bands['beta'] * 100
+        ERD_mean = (ERD_mu + ERD_beta) / 2
+        trials.append([ERD_mu, ERD_beta, ERD_mean])
+    return np.array(trials)
+
+def erd_process(protocol):
+    rest_l, stim_l = rest_stim_bands(protocol.events, 'left', protocol.srate)
+    rest_r, stim_r = rest_stim_bands(protocol.events, 'right', protocol.srate)
+
+    l_trials = calc_trials(protocol, rest_l, stim_l)
+    r_trials = calc_trials(protocol, rest_r, stim_r)
+
+    # Make Json
+    out = {}
+    for hand, data in [('left', l_trials), ('right', r_trials)]:
+        ch_dict = {}
+
+        ch_names = ['c3', 'c4', 'cz']
+        picked = protocol.pick_channels(['C3', 'C4', 'Cz'])
+        for ch_name, ch_idx in zip(ch_names, picked):
+            ch_data = data[:, :, ch_idx]
+            band_dict = {}
+            for band, band_idx in (('mu', 0), ('beta', 1), ('erd', 2)):
+                band_data = ch_data[:, band_idx]
+                band_dict[band] = {'mean': truncate(np.mean(band_data)), 'max': truncate(np.max(band_data))}
+            ch_dict[ch_name] = band_dict
+        out[hand] = ch_dict
+    return out
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -199,11 +278,16 @@ def main():
     protocol.eeg_data = bandpass_filter(protocol.eeg_data, protocol.srate, l_freq=1, h_freq=40, method='iir')
 
     # Process Background
-    result = background_process(protocol)
+    background_result = background_process(protocol)
+    # Process ERD
+    erd_result = erd_process(protocol)
+
+    result = background_result
+    result['imagin'] = erd_result
     if result is not None:
         with open("report_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-
+# /Users/vladimirantipov/Documents/Neurolab/Experiments/HandMoves/dataset3/data/1/data.xdf
 if __name__ == "__main__":
     main()
