@@ -184,7 +184,7 @@ def background_process(protocol):
             for band_name in bands.keys():
                 v_abs = np.mean(power_abs[band_name][ch_idx])
                 band_sum += v_abs
-                reg[band_name]['abs'] = truncate(v_abs, 3)
+                reg[band_name] = {'abs': truncate(v_abs, 3)}
 
             for band_name in bands.keys():
                 v_rel = np.mean(power_abs[band_name][ch_idx])/band_sum
