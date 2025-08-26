@@ -6,6 +6,7 @@ import json
 import argparse
 from pathlib import Path
 from scipy.signal import firwin, butter, filtfilt, sosfiltfilt, welch
+from datetime import datetime
 
 EXIT_SUCCESS = 0
 EXIT_ERROR_NO_DATA = 1
@@ -295,6 +296,18 @@ def main():
     protocol.eeg_data = bandpass_filter(protocol.eeg_data, protocol.srate, l_freq=1, h_freq=40, method='iir')
 
     result = {}
+    # Patient
+    patient = protocol.patient
+    name = ' '.join([patient['lastName'], patient['firstName'],  patient['middleName']])
+    birthday = datetime.strptime(patient['birthDate'], '%a %b %d %Y').strftime('%d.%m.%Y')
+    result['patient'] = {'name': name, 'sex': patient['gender'], 'birthday': birthday}
+
+    #Procedure
+    dt = datetime.strptime(protocol.task['StartTime'], '%d.%m.%Y %H:%M:%S')
+    date = dt.strftime('%d.%m.%Y')
+    time = dt.strftime('%H:%M:%S')
+    result['procedure'] = {'name': protocol.task['TaskName'], 'date': date, 'time': time}
+
     # Process Background
     result['background'] = background_process(protocol)
 
