@@ -174,11 +174,11 @@ def background_process(protocol):
 
         psds, freqs = psd_welch(data, sfreq=protocol.srate, fmin=0.5, fmax=30)
         power_abs = power_band(psds, freqs, bands, power='abs')
-        #power_rel = {
-        #    band: power / sum(power_abs.values())
-        #    for band, power in power_abs.items()
-        #}
-        power_rel = power_band(psds, freqs, bands, power='rel')
+        power_rel = {
+           band: power / sum(power_abs.values())
+           for band, power in power_abs.items()
+        }
+        #power_rel = power_band(psds, freqs, bands, power='rel')
 
         for region_name, ch_list in REGIONS.items():
             ch_idx = protocol.pick_channels(ch_list)
@@ -283,15 +283,14 @@ def main():
     protocol = ProtocolData(directory)
     protocol.eeg_data = bandpass_filter(protocol.eeg_data, protocol.srate, l_freq=1, h_freq=40, method='iir')
 
+    result = {}
     # Process Background
-    background_result = background_process(protocol)
+    result['background'] = None#background_process(protocol)
+
     # Process ERD
-    erd_result = erd_process(protocol)
+    result['imagin'] = erd_process(protocol)
 
-    result = background_result
-    result['imagin'] = erd_result
-
-    if result is None:
+    if not result:
         logger.error("No data to process")
         return EXIT_ERROR_PROCESSING
 
