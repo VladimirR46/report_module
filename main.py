@@ -1,10 +1,16 @@
 import numpy as np
+import sys
 import pyxdf
 import logging
 import json
 import argparse
 from pathlib import Path
 from scipy.signal import firwin, butter, filtfilt, sosfiltfilt, welch
+
+EXIT_SUCCESS = 0
+EXIT_ERROR_NO_DATA = 1
+EXIT_ERROR_PROCESSING = 2
+EXIT_ERROR_JSON_WRITE = 3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -272,7 +278,7 @@ def main():
     directory = Path(args.data_path)
     if not directory.exists():
         logger.error(f"Error: path {args.data_path} does not exist")
-        return
+        return EXIT_ERROR_NO_DATA
 
     protocol = ProtocolData(directory)
     protocol.eeg_data = bandpass_filter(protocol.eeg_data, protocol.srate, l_freq=1, h_freq=40, method='iir')
@@ -284,10 +290,16 @@ def main():
 
     result = background_result
     result['imagin'] = erd_result
-    if result is not None:
-        with open("report_data.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
 
-# /Users/vladimirantipov/Documents/Neurolab/Experiments/HandMoves/dataset3/data/1/data.xdf
+    if result is None:
+        logger.error("No data to process")
+        return EXIT_ERROR_PROCESSING
+
+    with open(protocol.directory / 'report_data.json', "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    logger.info("Report successfully created")
+
+    return EXIT_SUCCESS
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
