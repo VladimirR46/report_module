@@ -175,20 +175,21 @@ def background_process(protocol):
 
         psds, freqs = psd_welch(data, sfreq=protocol.srate, fmin=0.5, fmax=30)
         power_abs = power_band(psds, freqs, bands, power='abs')
-        power_rel = {
-           band: power / sum(power_abs.values())
-           for band, power in power_abs.items()
-        }
-        #power_rel = power_band(psds, freqs, bands, power='rel')
 
         for region_name, ch_list in REGIONS.items():
             ch_idx = protocol.pick_channels(ch_list)
             reg = out[stage].setdefault(region_name, {})
 
+            band_sum = 0
             for band_name in bands.keys():
-                v_abs = truncate(np.mean(power_abs[band_name][ch_idx]), 3)
-                v_rel = truncate(np.mean(power_rel[band_name][ch_idx]), 3)
-                reg[band_name] = {"abs": v_abs, "rel": v_rel}
+                v_abs = np.mean(power_abs[band_name][ch_idx])
+                band_sum += v_abs
+                reg[band_name]['abs'] = truncate(v_abs, 3)
+
+            for band_name in bands.keys():
+                v_rel = np.mean(power_abs[band_name][ch_idx])/band_sum
+                reg[band_name]['rel'] = truncate(v_rel, 3)
+
     return out
 
 def rest_stim_bands(events, hand, srate):
@@ -279,7 +280,7 @@ def lateral_index_process(imagin_data):
                        (data['c3']['beta']['mean'] + data['c4']['beta']['mean']))
         LI_ERD_mean = ((data['c3']['erd']['mean'] - data['c4']['erd']['mean']) /
                        (data['c3']['erd']['mean'] + data['c4']['erd']['mean']))
-        out[hand] = {'mu': LI_ERD_mu, 'beta': LI_ERD_beta, 'erd': LI_ERD_mean}
+        out[hand] = {'mu': truncate(LI_ERD_mu, 4), 'beta': truncate(LI_ERD_beta, 4), 'erd': truncate(LI_ERD_mean, 4)}
     return out
 
 def main():
