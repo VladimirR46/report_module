@@ -269,6 +269,17 @@ def erd_process(protocol):
         out[hand] = ch_dict
     return out
 
+def lateral_index_process(imagin_data):
+    out = {}
+    for hand, data in imagin_data.items():
+        LI_ERD_mu = ((data['c3']['mu']['mean'] - data['c4']['mu']['mean']) /
+                     (data['c3']['mu']['mean'] + data['c4']['mu']['mean']))
+        LI_ERD_beta = ((data['c3']['beta']['mean'] - data['c4']['beta']['mean']) /
+                       (data['c3']['beta']['mean'] + data['c4']['beta']['mean']))
+        LI_ERD_mean = ((data['c3']['erd']['mean'] - data['c4']['erd']['mean']) /
+                       (data['c3']['erd']['mean'] + data['c4']['erd']['mean']))
+        out[hand] = {'mu': LI_ERD_mu, 'beta': LI_ERD_beta, 'erd': LI_ERD_mean}
+    return out
 
 def main():
     parser = argparse.ArgumentParser()
@@ -285,10 +296,11 @@ def main():
 
     result = {}
     # Process Background
-    result['background'] = None#background_process(protocol)
+    result['background'] = background_process(protocol)
 
     # Process ERD
     result['imagin'] = erd_process(protocol)
+    result['lateral_index'] = lateral_index_process(result['imagin'])
 
     if not result:
         logger.error("No data to process")
