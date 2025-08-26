@@ -152,7 +152,7 @@ class ProtocolData:
 
 def truncate(val, decimals=3):
     sig = max(0, 4 - len(str(int(val))))
-    return format(val , '.%df' % sig)
+    return float(format(val , '.%df' % sig))
 
 def background_process(protocol):
     b_idxs = np.where(protocol.events['sample_type'] == 'Background')[0]
