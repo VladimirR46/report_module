@@ -15,4 +15,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["brainbuilding-report"]
+packages = ["brainbuilding_report"]
