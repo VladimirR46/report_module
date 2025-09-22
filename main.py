@@ -117,8 +117,7 @@ class ProtocolData:
         first_time = self.eeg_stream["time_stamps"][0]
         event_dict = {'source': [], 'event_name': [], 'sample_type': [], 'trial_type': [], 'block_type': [],
                       'block_id': [], 'trial_id': [], 'event_id': [], 'item_id': [], 'sample_id': [],
-                      'trigger_code': [],
-                      'time': [], 'index': [], 'duration': []}
+                      'lsl_code': [], 'time': [], 'index': [], 'duration': [], 'data': []}
         for event in events:
             sample = samples[event['sample_id']]
             event_dict['source'].append(event['source'])
@@ -131,9 +130,10 @@ class ProtocolData:
             event_dict['event_id'].append(event['event_id'])
             event_dict['item_id'].append(event['item_id'])
             event_dict['sample_id'].append(event['sample_id'])
-            event_dict['trigger_code'].append(sample['trigger_code'])
+            event_dict['lsl_code'].append(event['lsl_code'])
             event_dict['time'].append(event['time'] - first_time)
             event_dict['duration'].append(float(sample['duration']) if event['event_name'] == 'show' else 0.0)
+            event_dict['data'].append(event['data'] if 'data' in event else {})
         for key in event_dict:
             event_dict[key] = np.array(event_dict[key])
         return event_dict
@@ -283,6 +283,42 @@ def lateral_index_process(imagin_data):
         out[hand] = {'mu': truncate(LI_ERD_mu, 4), 'beta': truncate(LI_ERD_beta, 4), 'erd': truncate(LI_ERD_mean, 4)}
     return out
 
+def hand_stim_id(protocol, hand):
+    events = protocol.events
+    stim_idx = np.where(
+        (np.isin(events['sample_type'], ['Point', 'Image'])) &
+        (events['trial_type'] == hand+'/hand') &
+        (events['event_name'] == 'show')
+    )[0]
+    stim_id = events['sample_id'][stim_idx]
+    return stim_id
+
+# def general_indicators_process(protocol):
+#     events = protocol.events
+#     true_samples_idx = []
+#     for index, (data, name) in enumerate(events['data'], events['event_name']):
+#         if name == 'tcp_message' and data.get('class') == 1:
+#             true_samples_idx.append(index)
+#     true_samples_idx = np.array(true_samples_idx)
+#
+#     #true_samples = np.array(set(true_samples))
+#     true_samples_id = np.array(true_samples_id)
+#
+#     first_
+#     for index, sample_id in enumerate(true_samples_id):
+#         if sample_id not in first_occurrence_map:
+#             first_occurrence_map[sample_id] = index
+#
+#     result = {}
+#     for hand in ['left', 'right']:
+#         stim_id = hand_stim_id(protocol, hand)
+#         true_count = np.isin(stim_id, true_samples_id).sum()
+#
+#         success = true_count * 100 / len(stim_id)
+#         #result[hand] = {'success': true_count*100/len(stim_id)}
+#
+#     return result
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path', help='Path to patient folder')
@@ -315,6 +351,9 @@ def main():
     # Process ERD
     result['imagin'] = erd_process(protocol)
     result['lateral_index'] = lateral_index_process(result['imagin'])
+
+    # Process General Indicators
+    #result['indicators'] = general_indicators_process(protocol)
 
     if not result:
         logger.error("No data to process")
