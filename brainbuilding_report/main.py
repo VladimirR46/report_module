@@ -200,7 +200,7 @@ def rest_stim_bands(events, hand, srate):
     )[0]
     rest_time = events['time'][rest]
     stim = np.where(
-        (np.isin(events['sample_type'], ['Point', 'Image'])) &
+        (events['sample_type'] == 'Move') &
         (events['trial_type'] == hand+'/hand') &
         (events['event_name'] == 'show')
     )[0]
