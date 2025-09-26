@@ -117,7 +117,7 @@ class ProtocolData:
         first_time = self.eeg_stream["time_stamps"][0]
         event_dict = {'source': [], 'event_name': [], 'sample_type': [], 'trial_type': [], 'block_type': [],
                       'block_id': [], 'trial_id': [], 'event_id': [], 'item_id': [], 'sample_id': [],
-                      'lsl_code': [], 'time': [], 'index': [], 'duration': [], 'data': []}
+                      'lsl_code': [], 'time': [], 'duration': [], 'data': []}
         for event in events:
             sample = samples[event['sample_id']]
             event_dict['source'].append(event['source'])
@@ -283,41 +283,48 @@ def lateral_index_process(imagin_data):
         out[hand] = {'mu': truncate(LI_ERD_mu, 4), 'beta': truncate(LI_ERD_beta, 4), 'erd': truncate(LI_ERD_mean, 4)}
     return out
 
-def hand_stim_id(protocol, hand):
+def general_indicators_process(protocol):
     events = protocol.events
-    stim_idx = np.where(
-        (np.isin(events['sample_type'], ['Point', 'Image'])) &
-        (events['trial_type'] == hand+'/hand') &
-        (events['event_name'] == 'show')
-    )[0]
-    stim_id = events['sample_id'][stim_idx]
-    return stim_id
+    show_time = 0.0
+    p_samples = {'left': [], 'right': []}
+    true_samples_id = {'left': [], 'right': []}
+    true_times = {'left': [], 'right': []}
+    for i in range(len(events['event_id'])):
+        source = events['source'][i]
+        data = events['data'][i]
+        name = events['event_name'][i]
+        sample_type = events['sample_type'][i]
+        sample_id = events['sample_id'][i]
+        hand = events['trial_type'][i].split('/')[0]
+        time = events['time'][i]
 
-# def general_indicators_process(protocol):
-#     events = protocol.events
-#     true_samples_idx = []
-#     for index, (data, name) in enumerate(events['data'], events['event_name']):
-#         if name == 'tcp_message' and data.get('class') == 1:
-#             true_samples_idx.append(index)
-#     true_samples_idx = np.array(true_samples_idx)
-#
-#     #true_samples = np.array(set(true_samples))
-#     true_samples_id = np.array(true_samples_id)
-#
-#     first_
-#     for index, sample_id in enumerate(true_samples_id):
-#         if sample_id not in first_occurrence_map:
-#             first_occurrence_map[sample_id] = index
-#
-#     result = {}
-#     for hand in ['left', 'right']:
-#         stim_id = hand_stim_id(protocol, hand)
-#         true_count = np.isin(stim_id, true_samples_id).sum()
-#
-#         success = true_count * 100 / len(stim_id)
-#         #result[hand] = {'success': true_count*100/len(stim_id)}
-#
-#     return result
+        if source == 'sample' and name == 'show' and sample_type == 'Move':
+            show_time = time
+
+        if name == 'tcp_message' and sample_type == 'Move':
+            prediction, probability = data.get('prediction'), data.get('probability')
+            p_samples[hand].append(probability)
+
+            if sample_id not in true_samples_id[hand] and prediction == 1 and probability > 0.8:
+                true_times[hand].append(time - show_time)
+                true_samples_id[hand].append(sample_id)
+
+    result = {}
+    for hand in ['left', 'right']:
+        true_count = len(true_samples_id[hand])
+        stim = np.where(
+            (events['sample_type'] == 'Move') &
+            (events['trial_type'] == hand + '/hand') &
+            (events['event_name'] == 'show')
+        )[0]
+
+        success = true_count * 100 / len(stim)
+        score = 1 / (1 - np.array(p_samples[hand]).mean())
+        result[hand] = {'success': truncate(success), 'score': truncate(score)}
+        if  len(true_times[hand]) > 0:
+            time = np.array(true_times[hand]).mean()
+            result[hand]['time'] = time
+    return result
 
 def main():
     parser = argparse.ArgumentParser()
@@ -353,7 +360,7 @@ def main():
     result['lateral_index'] = lateral_index_process(result['imagin'])
 
     # Process General Indicators
-    #result['indicators'] = general_indicators_process(protocol)
+    result['indicators'] = general_indicators_process(protocol)
 
     if not result:
         logger.error("No data to process")
