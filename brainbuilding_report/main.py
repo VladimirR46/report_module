@@ -323,7 +323,7 @@ def general_indicators_process(protocol):
         result[hand] = {'success': truncate(success), 'score': truncate(score)}
         if  len(true_times[hand]) > 0:
             time = np.array(true_times[hand]).mean()
-            result[hand]['time'] = time
+            result[hand]['time'] = truncate(time)
     return result
 
 def main():
