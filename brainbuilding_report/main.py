@@ -326,6 +326,40 @@ def general_indicators_process(protocol):
             result[hand]['time'] = truncate(time)
     return result
 
+def general_indicators_process2(protocol):
+    events = protocol.events
+    result = {}
+    for hand in ['left', 'right']:
+        stimulation = np.where(
+            (events['sample_type'] == 'Move') &
+            (events['trial_type'] == hand + '/hand') &
+            (events['event_name'] == 'stimulation')
+        )[0]
+        pred_count = len(stimulation)
+
+        true_stim = np.where(
+            (events['sample_type'] == 'Move') &
+            (events['trial_type'] == hand + '/hand') &
+            (events['event_name'] == 'show')
+        )[0]
+        true_count = len(true_stim)
+
+        prob_list, delay_list = [], []
+        for i, idx in enumerate(stimulation):
+            prob_list.append(events['data'][idx]['probability'])
+            delay_list.append(events['data'][idx]['delay'])
+        prob_list = np.array(prob_list)
+        delay_list = np.array(delay_list)
+
+        success = pred_count * 100 / true_count
+        score = 1 / (1 - prob_list.mean())
+        delay = delay_list.mean()
+
+        result[hand] = {'success': truncate(success),
+                        'score': truncate(score),
+                        'delay': truncate(delay)}
+    return result
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path', help='Path to patient folder')
@@ -360,7 +394,7 @@ def main():
     result['lateral_index'] = lateral_index_process(result['imagin'])
 
     # Process General Indicators
-    result['indicators'] = general_indicators_process(protocol)
+    result['indicators'] = general_indicators_process2(protocol)
 
     if not result:
         logger.error("No data to process")
