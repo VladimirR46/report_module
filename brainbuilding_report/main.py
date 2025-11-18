@@ -357,7 +357,7 @@ def general_indicators_process2(protocol):
 
         result[hand] = {'success': truncate(success),
                         'score': truncate(score),
-                        'delay': truncate(delay)}
+                        'time': truncate(delay)}
     return result
 
 def main():
